@@ -304,7 +304,8 @@ bit_field = '0.10'
 bitvec = '1'
 # bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.1' }
 # bls12_381 = { package = "sp1_bls12_381", git = "https://github.com/0xPolygonHermez/zisk-patch-bls12-381.git", tag = "patch-0.8.0-zisk-0.13.0" }
-bls12_381 = { package = "sp1_bls12_381", path = "../zisk-bls12_381" }
+# bls12_381 = { package = "sp1_bls12_381", path = "../zisk-bls12_381" }
+bls12_381 = { path = "../grandine-universal-precompiles-bls12_381" }
 
 blst = { version = '0.3', features = ['portable'] }
 bonsai-sdk = '1.4'
@@ -436,7 +437,8 @@ serde_yaml = '0.9'
 # The `asm` feature in `sha2` doesn't do anything on recent `x86_64` CPUs
 # because `sha2` defaults to using CPU intrinsics.
 # sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.1', features = ['compress'] }
-sha2 = { git = 'https://github.com/0xPolygonHermez/zisk-patch-hashes.git', tag = 'patch-sha2-0.10.9-zisk-0.12.0', features = ['compress'] }
+# sha2 = { git = 'https://github.com/0xPolygonHermez/zisk-patch-hashes.git', tag = 'patch-sha2-0.10.9-zisk-0.12.0', features = ['compress'] }
+sha2 = { path = "../grandine-universal-precompiles-sha2/sha2", features = ['compress'] }
 
 smallvec = { version = '1', features = ['serde', 'union'] }
 snap = '1'
@@ -478,7 +480,6 @@ web3 = { git = 'https://github.com/grandinetech/rust-web3.git' }
 winsafe = { version = '0', features = ['kernel', 'psapi'] }
 xz2 = { version = '0.1' }
 zeroize = { version = '1', features = ['derive', 'serde'] }
-ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.13.0" }
 
 allocator = { path = 'allocator' }
 arithmetic = { path = 'arithmetic' }
@@ -609,9 +610,10 @@ lto = false
 jsonrpc-core = { git = 'https://github.com/grandinetech/jsonrpc.git' }
 quick-protobuf = { git = 'https://github.com/sigp/quick-protobuf.git', rev = '681f413312404ab6e51f0b46f39b0075c6f4ebfd' }
 # sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.1' }
-sha2 = { git = 'https://github.com/0xPolygonHermez/zisk-patch-hashes.git', tag = 'patch-sha2-0.10.9-zisk-0.12.0' }
+# sha2 = { git = 'https://github.com/0xPolygonHermez/zisk-patch-hashes.git', tag = 'patch-sha2-0.10.9-zisk-0.12.0' }
+sha2 = { path = "../grandine-universal-precompiles-sha2/sha2" }
 
 [patch.'https://github.com/zkcrypto/bls12_381.git']
 # bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.1' }
 # bls12_381 = { package = "sp1_bls12_381", git = "https://github.com/0xPolygonHermez/zisk-patch-bls12-381.git", tag = "patch-0.8.0-zisk-0.13.0" }
-bls12_381 = { package = "sp1_bls12_381", path = "../zisk-bls12_381" }
+bls12_381 = { path = "../grandine-universal-precompiles-bls12_381" }

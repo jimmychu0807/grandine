@@ -18,11 +18,3 @@ transition_functions = { path = "../../../transition_functions" }
 types = { path = "../../../types" }
 ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.13.0" }
 serde = { version = '1', features = ['derive', 'rc'] }
-
-[build-dependencies]
-snap = '1'
-bincode = '1'
-
-[patch.'https://github.com/zkcrypto/bls12_381.git']
-# bls12_381 = { git = "https://github.com/0xPolygonHermez/zisk-patch-bls12-381.git", tag = "patch-0.8.0-zisk-0.13.0" }
-bls12_381 = { package = "sp1_bls12_381", path = "../../../../zisk-bls12_381" }

@@ -45,7 +45,7 @@ risc0 = [
     "dep:risc0-zkvm",
     "dep:tracing-subscriber",
     "dep:zkvm_guest_risc0",
-    # "bls-zkcrypto/zkvm-risc0",
+    "bls-zkcrypto/zkvm-risc0",
 ]
 sp1 = [
     "dep:sp1-helper",
@@ -56,6 +56,6 @@ pico = [
     "dep:pico-sdk",
     "dep:pico-vm",
     "dep:anyhow",
-    # "bls-zkcrypto/zkvm-pico",
+    "bls-zkcrypto/zkvm-pico",
 ]
 zisk = []
