@@ -100,7 +100,7 @@ struct Context {
     slasher_config: Option<SlasherConfig>,
     state_slot: Option<Slot>,
     eth1_auth: Arc<Auth>,
-    http_api_config: HttpApiConfig,
+    http_api_config: Option<HttpApiConfig>,
     max_events: usize,
     metrics_config: MetricsConfig,
     track_liveness: bool,
@@ -358,9 +358,11 @@ fn try_main() -> Result<()> {
 
     let log_handle = binary_utils::initialize_tracing_logger(
         module_path!(),
-        &data_dir,
+        data_dir.as_deref(),
+        parsed_args.telemetry_config(),
         cfg!(feature = "logger-always-write-style"),
     )?;
+
     binary_utils::initialize_rayon()?;
 
     let config = parsed_args
@@ -419,6 +421,7 @@ fn try_main() -> Result<()> {
         backfill_custody_groups,
         disable_engine_getblobs,
         sync_without_reconstruction,
+        ..
     } = config;
 
     PEER_LOG_METRICS.set_target_peer_count(network_config.target_peers);
@@ -434,7 +437,7 @@ fn try_main() -> Result<()> {
     // The ports could in theory be freed or taken between restarts, but it's not likely.
     if command.is_none() {
         ensure_ports_not_in_use(
-            http_api_config.address,
+            http_api_config.as_ref().map(|config| config.address),
             &network_config,
             metrics_server_config.as_ref(),
             validator_api_config.as_ref(),
@@ -591,17 +594,19 @@ fn try_main() -> Result<()> {
 // Ports are checked before binding them for actual use.
 // This is a TOCTOU race condition, but the only consequence of it is slightly worse error messages.
 fn ensure_ports_not_in_use(
-    http_address: SocketAddr,
+    http_address: Option<SocketAddr>,
     network_config: &NetworkConfig,
     metrics_server_config: Option<&MetricsServerConfig>,
     validator_api_config: Option<&ValidatorApiConfig>,
 ) -> Result<()> {
-    TcpListener::bind(http_address).map_err(|error| Error::PortInUse {
-        port: http_address.port(),
-        service: "HTTP API",
-        option: "--http-port",
-        error: error.into(),
-    })?;
+    if let Some(http_address) = http_address {
+        TcpListener::bind(http_address).map_err(|error| Error::PortInUse {
+            port: http_address.port(),
+            service: "HTTP API",
+            option: "--http-port",
+            error: error.into(),
+        })?;
+    }
 
     if let Some(listen_addr) = network_config.listen_addrs().v4() {
         let ListenAddr {

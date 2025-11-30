@@ -4,6 +4,8 @@ edition = "2024"
 version = "0.1.0"
 authors = ["Grandine <info@grandine.io>"]
 
+[workspace]
+
 [dependencies]
 anyhow = '1.0.93'
 bls = { path = '../../../bls', features = ['zkcrypto'] }

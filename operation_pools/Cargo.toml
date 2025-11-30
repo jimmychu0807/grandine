@@ -11,7 +11,6 @@ anyhow = { workspace = true }
 bit_field = { workspace = true }
 bls = { workspace = true }
 clock = { workspace = true }
-conv = { workspace = true }
 dedicated_executor = { workspace = true }
 eip_7594 = { workspace = true }
 eth1_api = { workspace = true }
@@ -32,7 +31,6 @@ ssz = { workspace = true }
 std_ext = { workspace = true }
 strum = { workspace = true }
 tap = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 transition_functions = { workspace = true }

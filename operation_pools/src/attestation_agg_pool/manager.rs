@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
 };
 
@@ -10,10 +10,10 @@ use dedicated_executor::DedicatedExecutor;
 use eth1_api::ApiController;
 use features::Feature;
 use fork_choice_control::Wait;
-use logging::warn_with_peers;
 use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
+use tracing::instrument;
 use types::{
     combined::{Attestation as CombinedAttestation, BeaconState},
     config::Config,
@@ -27,7 +27,6 @@ use validator_statistics::ValidatorStatistics;
 
 use crate::{
     attestation_agg_pool::{
-        conversion,
         pool::Pool,
         tasks::{
             BestProposableAttestationsTask, ComputeProposerIndicesTask, InsertAttestationTask,
@@ -37,8 +36,6 @@ use crate::{
     },
     misc::PoolTask,
 };
-
-use super::conversion::convert_attestation_for_pool;
 
 pub struct Manager<P: Preset, W: Wait> {
     controller: ApiController<P, W>,
@@ -153,36 +150,25 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         });
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn insert_attestation(
         &self,
         wait_group: W,
-        attestation: &CombinedAttestation<P>,
-        mut attester_index: Option<ValidatorIndex>,
+        attestation: Arc<CombinedAttestation<P>>,
+        attester_index: Option<ValidatorIndex>,
     ) {
-        if let CombinedAttestation::Single(single_attestation) = attestation {
-            attester_index = Some(single_attestation.attester_index);
-        }
-
-        match convert_attestation_for_pool(&self.controller, (*attestation).clone()) {
-            Ok(attestation) => {
-                self.spawn_detached(InsertAttestationTask {
-                    wait_group,
-                    pool: self.pool.clone_arc(),
-                    attestation: Arc::new(attestation),
-                    attester_index,
-                    metrics: self.metrics.clone(),
-                    validator_statistics: self.validator_statistics.clone(),
-                });
-            }
-            Err(error) => match error.downcast_ref::<conversion::Error<P>>() {
-                Some(conversion::Error::<P>::Irrelevant { .. }) => {}
-                _ => {
-                    warn_with_peers!("Failed to convert attestation for pool: {error:?}");
-                }
-            },
-        }
+        self.spawn_detached(InsertAttestationTask {
+            wait_group,
+            pool: self.pool.clone_arc(),
+            controller: self.controller.clone_arc(),
+            attestation,
+            attester_index,
+            metrics: self.metrics.clone(),
+            validator_statistics: self.validator_statistics.clone(),
+        });
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub async fn is_registered_validator(&self, validator_index: ValidatorIndex) -> bool {
         self.pool.is_registered_validator(validator_index).await
     }
@@ -193,6 +179,10 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             controller: self.controller.clone_arc(),
             metrics: self.metrics.clone(),
         });
+    }
+
+    pub async fn registered_validator_indices(&self) -> HashSet<ValidatorIndex> {
+        self.pool.registered_validator_indices().await
     }
 
     pub fn set_committees_with_aggregators(

@@ -12,6 +12,7 @@ use state_cache::{QueryOptions, StateCache, StateWithRewards};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use thiserror::Error;
+use tracing::instrument;
 use transition_functions::combined;
 use types::{
     combined::BeaconState,
@@ -39,6 +40,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         }
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn before_or_at_slot<S: Storage<P>>(
         &self,
         store: &Store<P, S>,
@@ -49,6 +51,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             .or_else(|| store_state_before_or_at_slot(store, block_root, slot))
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn before_or_at_slot_in_cache_only(
         &self,
         block_root: H256,
@@ -61,6 +64,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             .map(|(state, _)| state)
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn existing_state_at_slot<S: Storage<P>>(
         &self,
         store: &Store<P, S>,
@@ -106,6 +110,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
+        store_result_state: bool,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         self.try_get_state_at_slot(
             pubkey_cache,
@@ -113,6 +118,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             block_root,
             slot,
             ALLOWED_EMPTY_SLOTS_MULTIPLIER,
+            store_result_state,
             should_print_slot_processing_warning(),
         )
     }
@@ -122,6 +128,7 @@ impl<P: Preset> StateCacheProcessor<P> {
     // - that could lead to excessive mem and CPU usage and result in DoS).
     // The exception is block sync - which should be allowed, because it's
     // the only way for the chain to progress in long periods without blocks.
+    #[instrument(level = "debug", skip_all)]
     pub fn try_state_at_slot_for_block_sync<S: Storage<P>>(
         &self,
         pubkey_cache: &PubkeyCache,
@@ -135,6 +142,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             block_root,
             slot,
             ALLOWED_EMPTY_SLOTS_MULTIPLIER_FOR_BLOCK_SYNC,
+            store.is_forward_synced(),
             should_print_slot_processing_warning(),
         )
     }
@@ -146,7 +154,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
-        self.try_state_at_slot(pubkey_cache, store, block_root, slot)?
+        self.try_state_at_slot(pubkey_cache, store, block_root, slot, true)?
             .ok_or(Error::StateNotFound { block_root })
             .map_err(Into::into)
     }
@@ -164,6 +172,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             block_root,
             slot,
             ALLOWED_EMPTY_SLOTS_MULTIPLIER,
+            store.is_forward_synced(),
             false,
         )?
         .ok_or(Error::StateNotFound { block_root })
@@ -201,6 +210,8 @@ impl<P: Preset> StateCacheProcessor<P> {
         self.state_cache.set_log_lock_timeouts(log_lock_timeouts);
     }
 
+    #[expect(clippy::too_many_arguments)]
+    #[instrument(level = "debug", skip_all)]
     fn try_get_state_at_slot<S: Storage<P>>(
         &self,
         pubkey_cache: &PubkeyCache,
@@ -208,11 +219,12 @@ impl<P: Preset> StateCacheProcessor<P> {
         block_root: H256,
         slot: Slot,
         allowed_empty_slots_multiplier: u64,
+        store_result_state: bool,
         warn_on_slot_processing: bool,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         let options = QueryOptions {
             ignore_missing_rewards: true,
-            store_result_state: store.is_forward_synced(),
+            store_result_state,
         };
 
         self.state_cache
@@ -243,6 +255,7 @@ impl<P: Preset> StateCacheProcessor<P> {
 }
 
 #[expect(clippy::too_many_arguments)]
+#[instrument(level = "debug", skip_all)]
 fn process_slots<P: Preset, S: Storage<P>>(
     pubkey_cache: &PubkeyCache,
     store: &Store<P, S>,
@@ -315,6 +328,7 @@ fn should_print_slot_processing_warning() -> bool {
     Feature::WarnOnStateCacheSlotProcessing.is_enabled()
 }
 
+#[instrument(level = "debug", skip_all)]
 fn store_state_before_or_at_slot<P: Preset, S: Storage<P>>(
     store: &Store<P, S>,
     block_root: H256,

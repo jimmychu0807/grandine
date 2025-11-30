@@ -5,37 +5,26 @@ use eth1_api::{ApiController, RealController};
 use fork_choice_control::Wait;
 use helper_functions::{accessors, misc};
 use logging::debug_with_peers;
-use ssz::ReadError;
-use thiserror::Error;
 use typenum::Unsigned as _;
 use types::{
     combined::{Attestation, BeaconState},
-    electra::containers::{Attestation as ElectraAttestation, SingleAttestation},
+    electra::{
+        containers::{Attestation as ElectraAttestation, SingleAttestation},
+        error::AttestationConversionError,
+    },
     phase0::containers::{Attestation as Phase0Attestation, AttestationData},
     preset::Preset,
 };
 
-#[derive(Debug, Error)]
-pub enum Error<P: Preset> {
-    #[error("invalid committee index for conversion")]
-    InvalidCommitteeIndex,
-    #[error("invalid aggregation bits for conversion")]
-    InvalidAggregationBits(#[source] ReadError),
-    #[error("attestation is not relevant anymore: {attestation:?}")]
-    Irrelevant { attestation: Box<Attestation<P>> },
-}
-
 pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
-    attestation: Attestation<P>,
+    attestation: Arc<Attestation<P>>,
 ) -> Result<Phase0Attestation<P>> {
     if attestation.data().slot + P::SlotsPerEpoch::U64 < controller.slot() {
-        bail!(Error::Irrelevant {
-            attestation: Box::new(attestation)
-        });
+        bail!(AttestationConversionError::Irrelevant);
     }
 
-    let attestation = match attestation {
+    let attestation = match Arc::unwrap_or_clone(attestation) {
         Attestation::Phase0(attestation) => attestation,
         Attestation::Electra(attestation) => {
             let ElectraAttestation {
@@ -49,12 +38,12 @@ pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
 
             let index = misc::get_committee_indices::<P>(committee_bits)
                 .next()
-                .ok_or(Error::<P>::InvalidCommitteeIndex)?;
+                .ok_or(AttestationConversionError::InvalidCommitteeIndex)?;
 
             Phase0Attestation {
                 aggregation_bits: aggregation_bits
                     .try_into()
-                    .map_err(Error::<P>::InvalidAggregationBits)?,
+                    .map_err(AttestationConversionError::InvalidAggregationBits)?,
                 data: AttestationData { index, ..data },
                 signature,
             }
@@ -115,7 +104,7 @@ fn current_state<P: Preset, W: Wait>(controller: &ApiController<P, W>) -> Arc<Be
         return controller.head_state().value;
     }
 
-    match controller.preprocessed_state_at_current_slot() {
+    match controller.preprocessed_state_at_current_slot_blocking() {
         Ok(state) => state,
         Err(error) => {
             debug_with_peers!(

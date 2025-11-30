@@ -1,5 +1,5 @@
 use core::{
-    fmt::{Formatter, Result as FmtResult},
+    fmt::{Debug as FmtDebug, Formatter, Result as FmtResult},
     num::NonZeroUsize,
 };
 use std::sync::Arc;
@@ -89,7 +89,7 @@ impl<P: Preset> ChainLink<P> {
     //                      - <https://github.com/ethereum/consensus-specs/pull/3232>
     //                      - <https://github.com/ethereum/consensus-specs/pull/3350>
     // fn is_post_deneb(&self) -> bool {
-    //     self.block.message().body().post_deneb().is_some()
+    //     self.block.message().body().with_blob_kzg_commitments().is_some()
     // }
 }
 
@@ -623,6 +623,19 @@ pub enum BlockAction<P: Preset> {
     DelayUntilParent(Arc<SignedBeaconBlock<P>>),
     DelayUntilSlot(Arc<SignedBeaconBlock<P>>),
     WaitForJustifiedState(ChainLink<P>, Vec<Result<Vec<ValidatorIndex>>>, Checkpoint),
+}
+
+impl<P: Preset> FmtDebug for BlockAction<P> {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            Self::Accept(_, _) => f.write_str("accept"),
+            Self::Ignore(_) => f.write_str("ignore"),
+            Self::DelayUntilBlobs(_, _) => f.write_str("delay_until_blobs"),
+            Self::DelayUntilParent(_) => f.write_str("delay_until_parent"),
+            Self::DelayUntilSlot(_) => f.write_str("delay_until_slot"),
+            Self::WaitForJustifiedState(_, _, _) => f.write_str("wait_for_justified_state"),
+        }
+    }
 }
 
 pub enum AggregateAndProofAction<P: Preset> {

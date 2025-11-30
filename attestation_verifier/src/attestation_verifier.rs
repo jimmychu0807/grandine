@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use debug_info::HealthCheck;
 use dedicated_executor::DedicatedExecutor;
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
@@ -99,8 +100,13 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
     }
 
     pub async fn run(mut self) -> Result<()> {
+        let mut health_check = HealthCheck::new("attestation_verifier");
+
         loop {
             select! {
+                _ = health_check.interval.select_next_some() => {
+                    health_check.check();
+                },
                 message = self.aggregates_task_to_verifier_rx.select_next_some() => {
                     match message {
                         TaskMessage::Finished(wait_group) => {
@@ -286,7 +292,10 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
             return snapshot.head_state();
         }
 
-        match self.controller.preprocessed_state_at_current_slot() {
+        match self
+            .controller
+            .preprocessed_state_at_current_slot_blocking()
+        {
             Ok(state) => state,
             Err(error) => {
                 debug_with_peers!(
@@ -478,7 +487,10 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
             return snapshot.head_state();
         }
 
-        match self.controller.preprocessed_state_at_current_slot() {
+        match self
+            .controller
+            .preprocessed_state_at_current_slot_blocking()
+        {
             Ok(state) => state,
             Err(error) => {
                 debug_with_peers!(

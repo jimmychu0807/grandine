@@ -15,6 +15,7 @@ members = [
     'clock',
     'data_dumper',
     'database',
+    'debug_info',
     'deposit_tree',
     'directories',
     'doppelganger_protection',
@@ -68,12 +69,7 @@ members = [
     'zkvm/guest/risc0',
     'zkvm/host',
 ]
-exclude = [
-    # Excluding the zkvm guest library will make the compiled guest code size a lot smaller, from
-    # ~200 MB -> 2.3 MB.
-    'zkvm/guest/pico',
-    'zkvm/guest/zisk',
-]
+
 # Feature resolver version 2 is the default starting with Rust 2021, but that does not apply in
 # virtual workspaces. Starting with Rust 1.72.0, Cargo warns if a Rust 2021 virtual workspace does
 # not explicitly specify a feature resolver. See <https://github.com/rust-lang/cargo/pull/10910>.
@@ -108,7 +104,7 @@ unsafe_code = 'forbid'
 absolute_paths_not_starting_with_crate = 'warn'
 anonymous_parameters                   = 'warn'
 deprecated_in_future                   = 'warn'
-deprecated_safe                        = { level = 'warn', priority = -1 }
+deprecated_safe                        = 'warn'
 keyword_idents_2018                    = 'warn'
 let_underscore_drop                    = 'warn'
 macro_use_extern_crate                 = 'warn'
@@ -303,7 +299,6 @@ bincode = '1'
 bit_field = '0.10'
 bitvec = '1'
 # bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.1' }
-# bls12_381 = { package = "sp1_bls12_381", git = "https://github.com/0xPolygonHermez/zisk-patch-bls12-381.git", tag = "patch-0.8.0-zisk-0.13.0" }
 # bls12_381 = { package = "sp1_bls12_381", path = "../zisk-bls12_381" }
 bls12_381 = { path = "../grandine-universal-precompiles-bls12_381" }
 
@@ -321,7 +316,6 @@ clap = { version = '4', features = ['derive'] }
 const-hex = '1.14'
 const_format = '0.2'
 constant_time_eq = '0.4'
-conv = '0.3'
 criterion = '0.7'
 crossbeam-skiplist = '0.1'
 crossbeam-utils = '0.8'
@@ -393,6 +387,9 @@ num_cpus = '1'
 num_threads = '0.1'
 once_cell = '1'
 openssl = '0.10'
+opentelemetry = '0.31'
+opentelemetry_sdk = '0.31'
+opentelemetry-otlp = { version = '0.31', features = ['grpc-tonic' ] }
 parking_lot = '0.12'
 parse-display = '0.10'
 pathdiff = '0.2'
@@ -440,6 +437,10 @@ serde_yaml = '0.9'
 # sha2 = { git = 'https://github.com/0xPolygonHermez/zisk-patch-hashes.git', tag = 'patch-sha2-0.10.9-zisk-0.12.0', features = ['compress'] }
 sha2 = { path = "../grandine-universal-precompiles-sha2/sha2", features = ['compress'] }
 
+slog = { version = '2', features = ['max_level_trace'] }
+slog-async = '2'
+slog-stdlog = '4'
+slog-term = '2'
 smallvec = { version = '1', features = ['serde', 'union'] }
 snap = '1'
 sp1-helper = '5.2.1'
@@ -465,6 +466,7 @@ tower = { version = '0.5', features = ['timeout'] }
 tower-http = { version = '0.6', features = ['cors', 'trace'] }
 tracing = '0.1'
 tracing-appender = '0.2'
+tracing-opentelemetry = '0.32'
 tracing-subscriber = { version = '0.3', features = ['env-filter', 'fmt', 'registry', 'chrono'] }
 tracing-test = '0.2'
 triomphe = '0.1'
@@ -495,6 +497,7 @@ builder_api = { path = 'builder_api' }
 clock = { path = 'clock' }
 data_dumper = { path = 'data_dumper' }
 database = { path = 'database' }
+debug_info = { path = 'debug_info' }
 deposit_tree = { path = 'deposit_tree' }
 directories = { path = 'directories' }
 doppelganger_protection = { path = 'doppelganger_protection' }
@@ -610,10 +613,8 @@ lto = false
 jsonrpc-core = { git = 'https://github.com/grandinetech/jsonrpc.git' }
 quick-protobuf = { git = 'https://github.com/sigp/quick-protobuf.git', rev = '681f413312404ab6e51f0b46f39b0075c6f4ebfd' }
 # sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.1' }
-# sha2 = { git = 'https://github.com/0xPolygonHermez/zisk-patch-hashes.git', tag = 'patch-sha2-0.10.9-zisk-0.12.0' }
 sha2 = { path = "../grandine-universal-precompiles-sha2/sha2" }
 
 [patch.'https://github.com/zkcrypto/bls12_381.git']
 # bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.1' }
-# bls12_381 = { package = "sp1_bls12_381", git = "https://github.com/0xPolygonHermez/zisk-patch-bls12-381.git", tag = "patch-0.8.0-zisk-0.13.0" }
 bls12_381 = { path = "../grandine-universal-precompiles-bls12_381" }

@@ -111,6 +111,7 @@ pub fn state_transition_for_report<P: Preset>(
 }
 
 #[expect(clippy::too_many_arguments)]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn custom_state_transition<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -292,6 +293,7 @@ pub fn verify_signatures<P: Preset>(
 }
 
 #[expect(clippy::too_many_lines)]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_slots<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -1164,7 +1166,8 @@ mod spec_tests {
             .next()
             .expect("test case should contain at least one block");
 
-        let Some(post_bellatrix_body) = first_block.message().body().post_bellatrix() else {
+        let Some(post_bellatrix_body) = first_block.message().body().with_execution_payload()
+        else {
             return false;
         };
 
@@ -1193,7 +1196,7 @@ mod spec_tests {
 
                 let header = message
                     .body()
-                    .post_bellatrix()
+                    .with_execution_payload()
                     .expect("blocks should be post-Merge")
                     .execution_payload()
                     .to_header();

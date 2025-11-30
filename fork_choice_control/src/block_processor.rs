@@ -16,6 +16,7 @@ use pubkey_cache::PubkeyCache;
 use ssz::SszHash;
 use state_cache::StateWithRewards;
 use std_ext::ArcExt as _;
+use tracing::instrument;
 use transition_functions::{
     combined,
     unphased::{ProcessSlots, StateRootPolicy},
@@ -38,6 +39,8 @@ pub struct BlockProcessor<P: Preset> {
     state_cache: Arc<StateCacheProcessor<P>>,
 }
 
+// NOTE: These functions are all potentially blocking due to state cache access.
+// They should be called within a blocking task only.
 impl<P: Preset> BlockProcessor<P> {
     pub fn process_untrusted_block_with_report(
         &self,
@@ -136,7 +139,8 @@ impl<P: Preset> BlockProcessor<P> {
     }
 
     #[expect(clippy::too_many_arguments)]
-    pub fn perform_state_transition(
+    #[instrument(level = "debug", skip_all)]
+    fn perform_state_transition(
         &self,
         mut state: Arc<BeaconState<P>>,
         block: &SignedBeaconBlock<P>,
@@ -196,6 +200,7 @@ impl<P: Preset> BlockProcessor<P> {
         })
     }
 
+    #[instrument(ret(level = "debug"), level = "debug", skip_all)]
     pub fn validate_block<E: ExecutionEngine<P> + Send>(
         &self,
         store: &Store<P, Storage<P>>,
@@ -232,7 +237,7 @@ impl<P: Preset> BlockProcessor<P> {
                     if let Some(body) = block
                         .message()
                         .body()
-                        .post_bellatrix()
+                        .with_execution_payload()
                         .filter(|body| predicates::is_merge_transition_block(&state, *body))
                     {
                         match validate_merge_block(

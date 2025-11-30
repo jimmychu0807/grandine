@@ -32,6 +32,7 @@ use pubkey_cache::PubkeyCache;
 use ssz::{ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
+use tracing::instrument;
 use transition_functions::{
     combined,
     unphased::{self, ProcessSlots, StateRootPolicy},
@@ -536,6 +537,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             })
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn state_by_block_root(&self, block_root: H256) -> Option<Arc<BeaconState<P>>> {
         self.chain_link(block_root)
             .map(|chain_link| chain_link.state(self))
@@ -1041,7 +1043,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 if let Some(body) = block
                     .message()
                     .body()
-                    .post_bellatrix()
+                    .with_execution_payload()
                     .filter(|body| predicates::is_merge_transition_block(&state, *body))
                 {
                     match validate_merge_block(&self.chain_config, block, body, &execution_engine)?
@@ -1069,6 +1071,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         })
     }
 
+    #[instrument(level = "debug", skip_all)]
     fn validate_gossip_rules(
         &self,
         block: &Arc<SignedBeaconBlock<P>>,
@@ -1136,6 +1139,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         state_transition_for_gossip(parent)
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn validate_block_with_custom_state_transition(
         &self,
         block: &Arc<SignedBeaconBlock<P>>,
@@ -2030,6 +2034,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[expect(clippy::too_many_arguments)]
     #[expect(clippy::too_many_lines)]
+    #[instrument(level = "debug", skip_all)]
     pub fn validate_data_column_sidecar_with_state(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
@@ -2242,6 +2247,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         Ok(DataColumnSidecarAction::Accept(data_column_sidecar))
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn validate_data_column_sidecar(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
@@ -2428,7 +2434,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let finalized_checkpoint_updated = old_finalized_checkpoint != self.finalized_checkpoint;
 
         let log_imported_block_info = || {
-            if let Some(post_deneb_block_body) = chain_link.block.message().body().post_deneb() {
+            if let Some(post_deneb_block_body) = chain_link
+                .block
+                .message()
+                .body()
+                .with_blob_kzg_commitments()
+            {
                 if self.should_check_data_availability_at_slot(chain_link.slot()) {
                     let blob_count = post_deneb_block_body.blob_kzg_commitments().len();
 
@@ -3711,7 +3722,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn indices_of_missing_blobs(&self, block: &SignedBeaconBlock<P>) -> Vec<BlobIndex> {
         let block = block.message();
 
-        let Some(body) = block.body().post_deneb() else {
+        let Some(body) = block.body().with_blob_kzg_commitments() else {
             return vec![];
         };
 
@@ -3741,7 +3752,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ) -> Vec<ColumnIndex> {
         let block = block.message();
 
-        let Some(body) = block.body().post_fulu() else {
+        // `block.phase` has already been checked
+        let Some(body) = block.body().with_blob_kzg_commitments() else {
             return vec![];
         };
 

@@ -17,6 +17,7 @@ use builder_api::{
     BuilderApi,
 };
 use clock::{Tick, TickKind};
+use debug_info::HealthCheck;
 use derive_more::Display;
 use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
@@ -169,12 +170,6 @@ pub struct Validator<P: Preset, W: Wait> {
 impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[expect(clippy::too_many_arguments)]
     #[must_use]
-    #[instrument(
-        parent = None,
-        level = "trace",
-        name = "validator_duties",
-        skip_all
-    )]
     pub fn new(
         validator_config: Arc<ValidatorConfig>,
         block_producer: Arc<BlockProducer<P, W>>,
@@ -257,8 +252,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         Ok(())
     }
 
+    #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     async fn run_internal(mut self) {
+        let mut health_check = HealthCheck::new("validator");
+
         loop {
             let mut slasher_to_validator_rx = self
                 .slasher_to_validator_rx
@@ -267,6 +265,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .unwrap_or_else(|| EitherFuture::Right(futures::stream::pending()));
 
             select! {
+                _ = health_check.interval.select_next_some() => {
+                    health_check.check();
+                },
+
                 message = self.internal_rx.select_next_some() => match message {
                     InternalMessage::DoppelgangerProtectionResult(result) => {
                         if let Err(error) = result {
@@ -282,6 +284,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     }
                     ValidatorMessage::Head(wait_group, head) => {
+                        let span = tracing::debug_span!("ValidatorMessage::Head", service = "validator");
+                        let _enter = span.enter();
+
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
                             let state = self.controller.state_by_chain_link(&head);
                             ValidatorToLiveness::Head(head.block.clone_arc(), state).send(validator_to_liveness_tx);
@@ -290,8 +295,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.attest_gossip_block(&wait_group, head).await;
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
+                        let span = tracing::debug_span!("ValidatorMessage::ValidAttestation", service = "validator");
+                        let _enter = span.enter();
+
                         self.attestation_agg_pool
-                            .insert_attestation(wait_group, &attestation, None);
+                            .insert_attestation(wait_group, attestation.clone_arc(), None);
 
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
                             ValidatorToLiveness::ValidAttestation(attestation)
@@ -299,6 +307,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     },
                     ValidatorMessage::PrepareExecutionPayload(slot, safe_execution_payload_hash, finalized_execution_payload_hash) => {
+                        let span = tracing::debug_span!("ValidatorMessage::PrepareExecutionPayload", service = "validator");
+                        let _enter = span.enter();
                         let slot_head = self.safe_slot_head(slot).await;
 
                         if let Some(slot_head) = slot_head {
@@ -378,6 +388,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 gossip_message = self.p2p_to_validator_rx.select_next_some() => match gossip_message {
                     P2pToValidator::AttesterSlashing(slashing, gossip_id) => {
+                        let span = tracing::debug_span!("P2pToValidator::AttesterSlashing", service = "validator");
+                        let _enter = span.enter();
+
                         let outcome = match self
                             .block_producer
                             .handle_external_attester_slashing(*slashing.clone())
@@ -396,6 +409,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
                     }
                     P2pToValidator::ProposerSlashing(slashing, gossip_id) => {
+                        let span = tracing::debug_span!("P2pToValidator::ProposerSlashing", service = "validator");
+                        let _enter = span.enter();
+
                         let outcome = match self
                             .block_producer
                             .handle_external_proposer_slashing(*slashing)
@@ -414,6 +430,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
                     }
                     P2pToValidator::VoluntaryExit(voluntary_exit, gossip_id) => {
+                        let span = tracing::debug_span!("P2pToValidator::VoluntaryExit", service = "validator");
+                        let _enter = span.enter();
+
                         let outcome = match self
                             .block_producer
                             .handle_external_voluntary_exit(*voluntary_exit)
@@ -436,6 +455,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 api_message = self.api_to_validator_rx.select_next_some() => {
                     let success = match api_message {
                         ApiToValidator::RegisteredValidators(sender) => {
+                            let span = tracing::debug_span!("ApiToValidator::RegisteredValidators", service = "validator");
+                            let _enter = span.enter();
+
                             let registered_pubkeys = self
                                 .registered_validators
                                 .values()
@@ -446,8 +468,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             sender.send(registered_pubkeys).is_ok()
                         },
                         ApiToValidator::SignedContributionsAndProofs(sender, contributions_and_proofs) => {
+                            let span = tracing::debug_span!("ApiToValidator::SignedContributionAndProof", service = "validator");
+                            let _enter = span.enter();
                             let current_slot = self.controller.slot();
-
                             let slot_head = self.safe_slot_head(current_slot).await;
 
                             let failures = slot_head
@@ -463,6 +486,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             sender.send(failures).is_ok()
                         },
                         ApiToValidator::ValidatorRegistrations(validator_registrations) => {
+                            let span = tracing::debug_span!("ApiToValidator::ValidatorRegistration", service = "validator");
+                            let _enter = span.enter();
                             let current_slot = self.controller.slot();
                             let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
 
@@ -507,6 +532,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     #[expect(clippy::too_many_lines)]
+    #[instrument(
+        parent = None,
+        level = "debug",
+        fields(
+            service = "validator",
+            tick = ?tick,
+        ),
+        skip_all
+    )]
     async fn handle_tick(&mut self, wait_group: W, tick: Tick) -> Result<()> {
         if let Some(metrics) = self.metrics.as_ref() {
             if tick.is_start_of_interval() {
@@ -518,21 +552,23 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let Tick { slot, kind } = tick;
 
+        let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+        if self.last_registration_epoch != Some(current_epoch) {
+            self.register_validators(current_epoch).await;
+        }
+
         let no_validators = self.signer.load().no_keys()
             && self.registered_validators.is_empty()
             && self.block_producer.no_prepared_proposers().await;
 
         debug_with_peers!("{kind:?} tick in slot {slot}");
 
-        let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
-
         if tick.is_start_of_epoch::<P>() {
             let _timer = self
                 .metrics
                 .as_ref()
                 .map(|metrics| metrics.validator_epoch_processing_times.start_timer());
-
-            self.register_validators(current_epoch).await;
 
             if let Some(validator_to_slasher_tx) = &self.validator_to_slasher_tx {
                 ValidatorToSlasher::Epoch(current_epoch).send(validator_to_slasher_tx);
@@ -563,16 +599,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         }
 
-        if self.last_registration_epoch.is_none() {
-            self.register_validators(current_epoch).await;
-        }
+        let own_validator_indices = self
+            .attestation_agg_pool
+            .registered_validator_indices()
+            .await;
 
         if self.last_cgc_update_epoch != Some(current_epoch)
             && !self.subscribe_to_all_data_column_subnets
             && self.chain_config.is_peerdas_scheduled()
-            && !self.signer.load().no_keys()
+            && !own_validator_indices.is_empty()
         {
-            self.handle_custody_requirements_update(slot);
+            self.handle_custody_requirements_update(slot, &own_validator_indices);
         }
 
         self.track_collection_metrics().await;
@@ -586,7 +623,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .ok()
         };
 
-        self.update_subnet_subscriptions(&wait_group, slot_head.as_ref());
+        self.update_subnet_subscriptions(&wait_group, slot_head.as_ref())
+            .await;
 
         if misc::is_epoch_start::<P>(slot) && kind == TickKind::AggregateFourth {
             self.refresh_signer_keys();
@@ -690,6 +728,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip_all)]
     async fn safe_slot_head(&self, slot: Slot) -> Option<SlotHead<P>> {
         self.slot_head(slot)
             .await
@@ -700,6 +739,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     // The nested `Result` is inspired by `sled`:
     // <https://sled.rs/errors.html#making-unhandled-errors-unrepresentable>
+    #[instrument(level = "debug", skip_all)]
     async fn slot_head(&self, slot: Slot) -> Result<Result<SlotHead<P>, HeadFarBehind>> {
         let WithStatus {
             value: head,
@@ -724,7 +764,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let controller = self.controller.clone_arc();
 
             tokio::task::spawn_blocking(move || {
-                controller.preprocessed_state_post_block(block_root, slot)
+                controller.preprocessed_state_post_block_blocking(block_root, slot)
             })
             .await??
         } else {
@@ -741,16 +781,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     /// <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#block-proposal>
     #[expect(clippy::too_many_lines)]
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "validator",
-            slot = slot_head.slot()
-        ),
-        name = "validator_duties",
-        skip_all,
-    )]
+    #[instrument(level = "debug", skip_all)]
     async fn propose(&mut self, wait_group: W, slot_head: &SlotHead<P>) -> Result<()> {
         if slot_head.slot() == GENESIS_SLOT {
             // All peers should already have the genesis block.
@@ -1090,15 +1121,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     /// - <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#attesting>
     /// - <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#attestation-aggregation>
     #[expect(clippy::too_many_lines)]
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "validator"
-        ),
-        name = "validator_duties",
-        skip_all
-    )]
+    #[instrument(level = "debug", skip_all)]
     async fn attest_and_start_aggregating(
         &mut self,
         wait_group: &W,
@@ -1197,7 +1220,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
             self.attestation_agg_pool.insert_attestation(
                 wait_group.clone(),
-                &attestation,
+                attestation,
                 Some(*validator_index),
             );
         }
@@ -1250,15 +1273,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     #[expect(clippy::too_many_lines)]
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "validator"
-        ),
-        name = "validator_duties",
-        skip_all
-    )]
+    #[instrument(level = "debug", skip_all)]
     async fn publish_aggregates_and_proofs(&self, wait_group: &W, slot_head: &SlotHead<P>) {
         if self.wait_for_fully_validated_head(slot_head).await.is_err() {
             warn_with_peers!(
@@ -1391,22 +1406,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let aggregate_and_proof = Arc::new(aggregate_and_proof);
 
             self.attestation_agg_pool
-                .insert_attestation(wait_group.clone(), &attestation, None);
+                .insert_attestation(wait_group.clone(), attestation, None);
 
             ValidatorToP2p::PublishAggregateAndProof(aggregate_and_proof).send(&self.p2p_tx);
         }
     }
 
     /// <https://github.com/ethereum/consensus-specs/blob/v1.1.1/specs/altair/validator.md#broadcast-sync-committee-message>
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "validator"
-        ),
-        name = "validator_duties",
-        skip_all
-    )]
+    #[instrument(level = "debug", skip_all)]
     async fn publish_sync_committee_messages(
         &mut self,
         wait_group: &W,
@@ -1480,15 +1487,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     /// <https://github.com/ethereum/consensus-specs/blob/v1.1.1/specs/altair/validator.md#broadcast-sync-committee-contribution>
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "validator"
-        ),
-        name = "validator_duties",
-        skip_all
-    )]
+    #[instrument(level = "debug", skip_all)]
     async fn publish_contributions_and_proofs(&self, slot_head: &SlotHead<P>) {
         if !self.controller.is_forward_synced() {
             return;
@@ -1545,6 +1544,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
+    #[instrument(level = "debug", skip_all)]
     async fn attest_gossip_block(&mut self, wait_group: &W, head: ChainLink<P>) {
         let Some(last_tick) = self.last_tick else {
             return;
@@ -1604,13 +1604,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     fn own_public_keys(&self) -> HashSet<PublicKeyBytes> {
         self.signer.load().keys().copied().collect::<HashSet<_>>()
-    }
-
-    fn own_validator_indices(&self, state: &BeaconState<P>) -> HashSet<ValidatorIndex> {
-        self.own_public_keys()
-            .into_iter()
-            .filter_map(|public_key| accessors::index_of_public_key(state, &public_key))
-            .collect()
     }
 
     #[expect(clippy::too_many_lines)]
@@ -1984,6 +1977,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 if chain_config.phase_at_slot::<P>(current_slot) != phase_at_slot {
                     beacon_state = match controller
                         .preprocessed_state_at_epoch(chain_config.fork_epoch(phase_at_slot))
+                        .await
                     {
                         Ok(with_status) => with_status.value,
                         Err(error) => {
@@ -2030,14 +2024,18 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    fn update_subnet_subscriptions(&mut self, wait_group: &W, slot_head: Option<&SlotHead<P>>) {
+    async fn update_subnet_subscriptions(
+        &mut self,
+        wait_group: &W,
+        slot_head: Option<&SlotHead<P>>,
+    ) {
         if !self.controller.is_forward_synced() {
             return;
         }
 
         let beacon_state = match slot_head.map(|sh| sh.beacon_state.clone_arc()) {
             Some(state) => state,
-            None => match self.controller.preprocessed_state_at_current_slot() {
+            None => match self.controller.preprocessed_state_at_current_slot().await {
                 Ok(state) => state,
                 Err(error) => {
                     let is_too_many_empty_slots = matches!(
@@ -2058,14 +2056,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.update_sync_committee_subscriptions(&beacon_state);
     }
 
-    fn handle_custody_requirements_update(&mut self, current_slot: Slot) {
+    fn handle_custody_requirements_update(
+        &mut self,
+        current_slot: Slot,
+        own_validator_indices: &HashSet<ValidatorIndex>,
+    ) {
         let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
         let last_finalized_state = self.controller.last_finalized_state().value;
-        let own_validator_indices = self.own_validator_indices(&last_finalized_state);
         let validator_custody_requirement = eip_7594::get_validator_custody_requirement(
             &self.chain_config,
             &last_finalized_state,
-            &own_validator_indices,
+            own_validator_indices,
         );
 
         let current_sampling_size: u64 = self
@@ -2140,16 +2141,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         });
     }
 
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "validator",
-            current_epoch = current_epoch
-        ),
-        name = "validator_duties",
-        skip_all,
-    )]
+    #[instrument(level = "debug", skip_all)]
     async fn register_validators(&mut self, current_epoch: Epoch) {
         if let Some(last_registration_epoch) = self.last_registration_epoch {
             let next_registration_epoch =

@@ -59,7 +59,6 @@ impl ReportTrait for Report {
 const ZKVM_GUEST_PICO_SUFFIX: &str = "elf/zkvm-guest-pico.elf";
 
 pub struct Vm;
-
 impl VmBackend for Vm {
     type Proof = Proof;
     type Report = Report;
@@ -116,11 +115,11 @@ impl VmBackend for Vm {
         let out_dir = env!("OUT_DIR");
         let zkvm_guest_path = Path::new(&out_dir).join(ZKVM_GUEST_PICO_SUFFIX);
         let elf = fs::read(&zkvm_guest_path).map_err(|err| {
-            anyhow!(
+            anyhow!(format!(
                 "Failed to load ELF file from {}: {}",
                 zkvm_guest_path.display(),
                 err
-            )
+            ))
         })?;
 
         // Initialize the prover client

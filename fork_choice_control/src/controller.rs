@@ -34,17 +34,14 @@ use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use std_ext::ArcExt as _;
 use thiserror::Error;
-use tracing::instrument;
+use tracing::{instrument, Span};
 use types::{
     combined::{
         Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    fulu::{
-        containers::{DataColumnSidecar, MatrixEntry},
-        primitives::ColumnIndex,
-    },
+    fulu::{containers::DataColumnSidecar, primitives::ColumnIndex},
     nonstandard::ValidationOutcome,
     phase0::{
         containers::BeaconBlockHeader,
@@ -117,7 +114,7 @@ where
         metrics: Option<Arc<Metrics>>,
         attestation_verifier_tx: A, // impl UnboundedSink<AttestationVerifierMessage<P, W>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
-        pool_tx: impl UnboundedSink<PoolMessage<W>>,
+        pool_tx: impl UnboundedSink<PoolMessage<P, W>>,
         subnet_tx: impl UnboundedSink<SubnetMessage<W>>,
         sync_tx: impl UnboundedSink<SyncMessage<P>>,
         validator_tx: impl UnboundedSink<ValidatorMessage<P, W>>,
@@ -240,15 +237,6 @@ where
     // More or less frequent calls are allowed but may worsen performance and quality of the head.
     // According to the Fork Choice specification, `on_tick` should be called every second,
     // but doing so would be redundant. The fork choice rule does not need a precise timestamp.
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "fork_choice"
-        ),
-        name = "fork_choice_control",
-        skip_all
-    )]
     pub fn on_tick(&self, tick: Tick) {
         // Don't spawn a new task because it would have very little to do.
         // Don't check if the tick is newer because `Store` will have to do it anyway.
@@ -280,12 +268,8 @@ where
 
     #[instrument(
         parent = None,
-        level = "trace",
-        fields(
-            service = "fork_choice"
-        ),
-        name = "fork_choice_control",
         skip_all
+        fields(gossip_id = ?gossip_id, slot = block.message().slot())
     )]
     pub fn on_gossip_block(&self, block: Arc<SignedBeaconBlock<P>>, gossip_id: GossipId) {
         self.spawn_block_task(block, BlockOrigin::Gossip(gossip_id))
@@ -293,12 +277,8 @@ where
 
     #[instrument(
         parent = None,
-        level = "trace",
-        fields(
-            service = "fork_choice"
-        ),
-        name = "fork_choice_control",
         skip_all
+        fields(peer_id = ?peer_id, slot = block.message().slot())
     )]
     pub fn on_requested_block(&self, block: Arc<SignedBeaconBlock<P>>, peer_id: Option<PeerId>) {
         self.spawn_block_task(block, BlockOrigin::Requested(peer_id))
@@ -306,12 +286,8 @@ where
 
     #[instrument(
         parent = None,
-        level = "trace",
-        fields(
-            service = "fork_choice"
-        ),
-        name = "fork_choice_control",
         skip_all
+        fields(slot = block.message().slot())
     )]
     pub fn on_own_block(&self, wait_group: W, block: Arc<SignedBeaconBlock<P>>) {
         self.spawn_block_task_with_wait_group(wait_group, block, BlockOrigin::Own)
@@ -359,6 +335,11 @@ where
         )
     }
 
+    #[instrument(
+        parent = None,
+        skip_all
+        fields(slot = block.message().slot())
+    )]
     pub fn on_api_block(
         &self,
         block: Arc<SignedBeaconBlock<P>>,
@@ -457,15 +438,6 @@ where
         .send(&self.attestation_verifier_tx);
     }
 
-    // #[instrument(
-    //     parent = None,
-    //     level = "trace",
-    //     fields(
-    //         service = "fork_choice"
-    //     ),
-    //     name = "fork_choice_control",
-    //     skip_all
-    // )]
     pub fn on_gossip_singular_attestation(
         &self,
         attestation: Arc<Attestation<P>>,
@@ -497,15 +469,6 @@ where
         })
     }
 
-    // #[instrument(
-    //     parent = None,
-    //     level = "trace",
-    //     fields(
-    //         service = "fork_choice"
-    //     ),
-    //     name = "fork_choice_control",
-    //     skip_all
-    // )]
     pub fn on_singular_attestation(&self, attestation: AttestationItem<P, GossipId>) {
         self.spawn(AttestationTask {
             store_snapshot: self.owned_store_snapshot(),
@@ -659,12 +622,14 @@ where
         &self,
         wait_group: W,
         block_root: H256,
-        full_matrix: Vec<MatrixEntry<P>>,
+        block: Arc<SignedBeaconBlock<P>>,
+        data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     ) {
         MutatorMessage::ReconstructedMissingColumns {
             wait_group,
             block_root,
-            full_matrix,
+            block,
+            data_column_sidecars,
         }
         .send(&self.mutator_tx)
     }
@@ -791,15 +756,6 @@ where
         })
     }
 
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "fork_choice"
-        ),
-        name = "fork_choice_control",
-        skip_all
-    )]
     fn spawn_block_task(&self, block: Arc<SignedBeaconBlock<P>>, origin: BlockOrigin) {
         self.spawn_block_task_with_wait_group(self.owned_wait_group(), block, origin)
     }
@@ -820,6 +776,7 @@ where
             origin,
             processing_timings: ProcessingTimings::new(),
             metrics: self.metrics.clone(),
+            tracing_span: Span::current(),
         })
     }
 
@@ -875,6 +832,10 @@ where
 
     pub(crate) fn owned_store_snapshot(&self) -> Arc<Store<P, Storage<P>>> {
         self.store_snapshot.load_full()
+    }
+
+    pub(crate) fn owned_storage(&self) -> Arc<Storage<P>> {
+        self.storage.clone_arc()
     }
 
     pub(crate) fn storage(&self) -> &Storage<P> {

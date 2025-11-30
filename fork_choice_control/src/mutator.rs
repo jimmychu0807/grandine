@@ -50,13 +50,13 @@ use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
-use tracing::instrument;
+use tracing::{instrument, Span};
 use typenum::Unsigned as _;
 use types::{
     combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar, MatrixEntry},
+        containers::{DataColumnIdentifier, DataColumnSidecar},
         primitives::ColumnIndex,
     },
     nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome},
@@ -148,7 +148,7 @@ where
     W: Wait,
     TS: UnboundedSink<AttestationVerifierMessage<P, W>>,
     PS: UnboundedSink<P2pMessage<P>>,
-    LS: UnboundedSink<PoolMessage<W>>,
+    LS: UnboundedSink<PoolMessage<P, W>>,
     NS: UnboundedSink<SubnetMessage<W>>,
     SS: UnboundedSink<SyncMessage<P>>,
     VS: UnboundedSink<ValidatorMessage<P, W>>,
@@ -221,9 +221,15 @@ where
                     origin,
                     processing_timings,
                     block_root,
-                } => {
-                    self.handle_block(wait_group, result, origin, processing_timings, block_root)?
-                }
+                    tracing_span,
+                } => self.handle_block(
+                    wait_group,
+                    result,
+                    origin,
+                    processing_timings,
+                    block_root,
+                    tracing_span,
+                )?,
                 MutatorMessage::AggregateAndProof { wait_group, result } => {
                     self.handle_aggregate_and_proof(&wait_group, result)?
                 }
@@ -326,10 +332,14 @@ where
                 MutatorMessage::ReconstructedMissingColumns {
                     wait_group,
                     block_root,
-                    full_matrix,
-                } => {
-                    self.handle_reconstructed_missing_columns(&wait_group, block_root, full_matrix)?
-                }
+                    block,
+                    data_column_sidecars,
+                } => self.handle_reconstructed_missing_columns(
+                    &wait_group,
+                    block_root,
+                    &block,
+                    data_column_sidecars,
+                ),
             }
         }
     }
@@ -380,6 +390,7 @@ where
                 origin,
                 processing_timings,
                 block_root,
+                tracing::debug_span!("handle_unfinalized_block"),
             )?;
         }
 
@@ -389,15 +400,6 @@ where
     }
 
     #[expect(clippy::too_many_lines)]
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "fork_choice"
-        ),
-        name = "fork_choice_control",
-        skip_all
-    )]
     fn handle_tick(&mut self, wait_group: &W, tick: Tick) -> Result<()> {
         if tick.epoch::<P>() > self.store.current_epoch() {
             let checkpoint = self.store.unrealized_justified_checkpoint();
@@ -436,9 +438,9 @@ where
 
             if head.is_optimistic() {
                 if let Some(execution_payload) = head.block.as_ref().clone().execution_payload() {
-                    let mut params = None;
-
-                    if let Some(body) = head.block.message().body().post_electra() {
+                    let params = if let Some(body) =
+                        head.block.message().body().with_blob_kzg_commitments()
+                    {
                         let versioned_hashes = body
                             .blob_kzg_commitments()
                             .iter()
@@ -446,24 +448,21 @@ where
                             .map(misc::kzg_commitment_to_versioned_hash)
                             .collect();
 
-                        params = Some(ExecutionPayloadParams::Electra {
-                            versioned_hashes,
-                            parent_beacon_block_root: head.block.message().parent_root(),
-                            execution_requests: body.execution_requests().clone(),
-                        });
-                    } else if let Some(body) = head.block.message().body().post_deneb() {
-                        let versioned_hashes = body
-                            .blob_kzg_commitments()
-                            .iter()
-                            .copied()
-                            .map(misc::kzg_commitment_to_versioned_hash)
-                            .collect();
-
-                        params = Some(ExecutionPayloadParams::Deneb {
-                            versioned_hashes,
-                            parent_beacon_block_root: head.block.message().parent_root(),
-                        });
-                    }
+                        if let Some(body) = body.with_execution_requests() {
+                            Some(ExecutionPayloadParams::Electra {
+                                versioned_hashes,
+                                parent_beacon_block_root: head.block.message().parent_root(),
+                                execution_requests: body.execution_requests().clone(),
+                            })
+                        } else {
+                            Some(ExecutionPayloadParams::Deneb {
+                                versioned_hashes,
+                                parent_beacon_block_root: head.block.message().parent_root(),
+                            })
+                        }
+                    } else {
+                        None
+                    };
 
                     self.execution_engine.notify_new_payload(
                         head.block_root,
@@ -590,13 +589,12 @@ where
     #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     #[instrument(
-        parent = None,
-        level = "trace",
+        skip_all,
+        parent = &tracing_span,
+        level = "debug",
         fields(
-            service = "fork_choice"
+            block_root = ?block_root,
         ),
-        name = "fork_choice_control",
-        skip_all
     )]
     fn handle_block(
         &mut self,
@@ -605,6 +603,7 @@ where
         origin: BlockOrigin,
         processing_timings: ProcessingTimings,
         block_root: H256,
+        tracing_span: Span,
     ) -> Result<()> {
         match *result {
             Ok(BlockAction::Accept(mut chain_link, attester_slashing_results)) => {
@@ -675,6 +674,7 @@ where
                     block,
                     origin,
                     processing_timings,
+                    tracing_span,
                 };
 
                 if pending_block.block.phase().is_peerdas_activated() {
@@ -733,6 +733,7 @@ where
                                     self.send_to_pool(PoolMessage::ReconstructDataColumns {
                                         wait_group,
                                         block_root,
+                                        block: pending_block.block.clone_arc(),
                                         slot: pending_block.block.message().slot(),
                                     })
                                 }
@@ -859,6 +860,7 @@ where
                     block,
                     origin,
                     processing_timings,
+                    tracing_span,
                 };
 
                 if self.store.contains_block(parent_root) {
@@ -887,6 +889,7 @@ where
                     block,
                     origin,
                     processing_timings,
+                    tracing_span,
                 };
 
                 if slot <= self.store.slot() {
@@ -1559,10 +1562,14 @@ where
                     ));
                 }
 
-                if !self.store.accepted_data_column_sidecar(
+                if self.store.accepted_data_column_sidecar(
                     data_column_sidecar.signed_block_header.message,
                     data_column_sidecar.index,
                 ) {
+                    let (_, sender) = origin.split();
+
+                    reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
+                } else {
                     let block_root = data_column_sidecar
                         .signed_block_header
                         .message
@@ -1837,28 +1844,14 @@ where
         &mut self,
         wait_group: &W,
         block_root: H256,
-        full_matrix: Vec<MatrixEntry<P>>,
-    ) -> Result<()> {
-        let Some(pending) = self.delayed_until_blobs.get(&block_root) else {
-            return Ok(());
-        };
+        block: &SignedBeaconBlock<P>,
+        mut data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
+    ) {
+        let missing_indices = self.store.indices_of_missing_data_columns(block);
 
-        let missing_indices = self.store.indices_of_missing_data_columns(&pending.block);
         if missing_indices.is_empty() {
-            return Ok(());
+            return;
         }
-
-        let timer = self
-            .metrics
-            .as_ref()
-            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
-
-        let cells_and_kzg_proofs = eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
-
-        let mut data_column_sidecars =
-            eip_7594::construct_data_column_sidecars(&pending.block, &cells_and_kzg_proofs)?;
-
-        prometheus_metrics::stop_and_record(timer);
 
         // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
         data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index));
@@ -1880,8 +1873,6 @@ where
                 self.send_to_p2p(P2pMessage::PublishDataColumnSidecar(data_column_sidecar));
             }
         }
-
-        Ok(())
     }
 
     fn handle_notified_forkchoice_update_result(
@@ -2056,15 +2047,7 @@ where
 
     #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "fork_choice"
-        ),
-        name = "fork_choice_control",
-        skip_all
-    )]
+    #[instrument(level = "debug", skip_all)]
     fn accept_block(
         &mut self,
         wait_group: &W,
@@ -2497,8 +2480,8 @@ where
         // During syncing, if we retry everytime when receiving a sidecar, this might spamming the
         // queue, leading to delaying other data column sidecar tasks
         if should_retry_block {
-            if let Some(pending_block) = self.delayed_until_blobs.get(&block_root) {
-                self.retry_block(wait_group.clone(), pending_block.clone());
+            if let Some(pending_block) = self.take_delayed_until_blobs(block_root) {
+                self.retry_block(wait_group.clone(), pending_block);
             }
         }
 
@@ -2955,13 +2938,18 @@ where
         }
     }
 
+    #[instrument(skip_all, level = "debug", parent = &pending_block.tracing_span)]
     fn retry_block(&self, wait_group: W, pending_block: PendingBlock<P>) {
-        trace_with_peers!("retrying delayed block: {pending_block:?}");
+        debug_with_peers!(
+            "retrying delayed block: {:?}",
+            pending_block.block.message().hash_tree_root(),
+        );
 
         let PendingBlock {
             block,
             origin,
             processing_timings,
+            tracing_span,
         } = pending_block;
 
         let processing_timings = processing_timings.processing();
@@ -2976,6 +2964,7 @@ where
             origin,
             processing_timings,
             metrics: self.metrics.clone(),
+            tracing_span,
         });
     }
 
@@ -3530,7 +3519,7 @@ where
         }
     }
 
-    fn send_to_pool(&self, message: PoolMessage<W>) {
+    fn send_to_pool(&self, message: PoolMessage<P, W>) {
         if self.finished_loading_from_storage {
             message.send(&self.pool_tx);
         }
@@ -3705,7 +3694,7 @@ where
         block: &SignedBeaconBlock<P>,
         pending_blobs_for_block: impl Iterator<Item = &'blob BlobSidecar<P>>,
     ) -> BlockBlobAvailability {
-        let Some(body) = block.message().body().post_deneb() else {
+        let Some(body) = block.message().body().with_blob_kzg_commitments() else {
             return BlockBlobAvailability::Irrelevant;
         };
 
@@ -3742,7 +3731,11 @@ where
         block: &SignedBeaconBlock<P>,
         mut pending_data_columns_for_block: impl Iterator<Item = &'column DataColumnSidecar<P>>,
     ) -> BlockDataColumnAvailability {
-        let Some(body) = block.message().body().post_fulu() else {
+        if !block.phase().is_peerdas_activated() {
+            return BlockDataColumnAvailability::Irrelevant;
+        }
+
+        let Some(body) = block.message().body().with_blob_kzg_commitments() else {
             return BlockDataColumnAvailability::Irrelevant;
         };
 
@@ -3811,6 +3804,7 @@ fn reply_delayed_block_validation_result<P: Preset>(
         block,
         origin,
         processing_timings,
+        tracing_span,
     } = pending_block;
 
     if let BlockOrigin::Api(Some(sender)) = origin {
@@ -3820,12 +3814,14 @@ fn reply_delayed_block_validation_result<P: Preset>(
             block,
             origin: BlockOrigin::Api(None),
             processing_timings,
+            tracing_span,
         }
     } else {
         PendingBlock {
             block,
             origin,
             processing_timings,
+            tracing_span,
         }
     }
 }

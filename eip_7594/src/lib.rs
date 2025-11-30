@@ -18,6 +18,7 @@ use rayon::iter::{
 };
 use sha2::{Digest as _, Sha256};
 use ssz::{ContiguousList, ContiguousVector, SszHash as _, Uint256};
+use tracing::instrument;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -144,6 +145,7 @@ pub fn compute_subnets_for_node<P: Preset>(
 }
 
 /// Verify if the data column sidecar is valid.
+#[instrument(level = "debug", skip_all)]
 pub fn verify_data_column_sidecar<P: Preset>(
     config: &Config,
     data_column_sidecar: &DataColumnSidecar<P>,
@@ -182,6 +184,7 @@ pub fn verify_data_column_sidecar<P: Preset>(
 }
 
 /// Verify if the KZG proofs are correct.
+#[instrument(level = "debug", skip_all)]
 pub fn verify_kzg_proofs<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
     backend: KzgBackend,
@@ -305,17 +308,28 @@ pub fn construct_data_column_sidecars<P: Preset>(
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
 ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
     let signed_block_header = signed_block.to_header();
-    let Some(post_electra_beacon_block_body) = signed_block.message().body().post_electra() else {
-        return Ok(vec![]);
+    let body = match signed_block {
+        SignedBeaconBlock::Fulu(block) => &block.message.body,
+        SignedBeaconBlock::Phase0(_)
+        | SignedBeaconBlock::Altair(_)
+        | SignedBeaconBlock::Bellatrix(_)
+        | SignedBeaconBlock::Capella(_)
+        | SignedBeaconBlock::Deneb(_)
+        | SignedBeaconBlock::Electra(_) => {
+            return Err(Error::BlobsForPreFuluBlock {
+                root: signed_block.message().hash_tree_root(),
+                slot: signed_block.message().slot(),
+            }
+            .into());
+        }
     };
 
-    let kzg_commitments = post_electra_beacon_block_body.blob_kzg_commitments();
+    let kzg_commitments = &body.blob_kzg_commitments;
     if kzg_commitments.is_empty() {
         return Ok(vec![]);
     }
 
-    let kzg_commitments_inclusion_proof =
-        misc::kzg_commitments_inclusion_proof(post_electra_beacon_block_body);
+    let kzg_commitments_inclusion_proof = misc::kzg_commitments_inclusion_proof(body);
 
     get_data_column_sidecars(
         signed_block_header,

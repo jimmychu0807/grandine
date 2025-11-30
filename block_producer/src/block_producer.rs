@@ -34,6 +34,7 @@ use ssz::{BitList, BitVector, ContiguousList, SszHash};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio::task::JoinHandle;
+use tracing::instrument;
 use transition_functions::{capella, electra, unphased};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -345,7 +346,8 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         let state = self
             .producer_context
             .controller
-            .preprocessed_state_at_current_slot()?;
+            .preprocessed_state_at_current_slot()
+            .await?;
 
         // TODO(feature/electra): implement trait for types::combined::AttesterSlashing
         let result = match slashing {
@@ -401,7 +403,8 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         let state = self
             .producer_context
             .controller
-            .preprocessed_state_at_current_slot()?;
+            .preprocessed_state_at_current_slot()
+            .await?;
 
         let outcome = match unphased::validate_proposer_slashing(
             &self.producer_context.chain_config,
@@ -442,7 +445,8 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         let state = self
             .producer_context
             .controller
-            .preprocessed_state_at_current_slot()?;
+            .preprocessed_state_at_current_slot()
+            .await?;
 
         let result = match state.as_ref() {
             BeaconState::Phase0(_)
@@ -642,8 +646,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .as_ref()
             .map(|metrics| metrics.build_beacon_block_times.start_timer());
 
-        let block_without_state_root = self
-            .build_beacon_block_without_state_root(randao_reveal)
+        let block_without_state_root =
+            wait_for_result(self.spawn_job(|build_context| async move {
+                build_context
+                    .build_beacon_block_without_state_root(randao_reveal)
+                    .await
+            }))
             .await?;
 
         let produce_beacon_block_join_handle = self.spawn_job(|build_context| async move {
@@ -666,8 +674,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             Option<BlockRewards>,
         )>,
     > {
-        let block_without_state_root = self
-            .build_beacon_block_without_state_root(randao_reveal)
+        let block_without_state_root =
+            wait_for_result(self.spawn_job(|build_context| async move {
+                build_context
+                    .build_beacon_block_without_state_root(randao_reveal)
+                    .await
+            }))
             .await?;
 
         let block = block_without_state_root.clone();
@@ -952,7 +964,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         .pipe(Ok)
     }
 
-    pub fn compute_on_chain_aggregate(
+    fn compute_on_chain_aggregate(
         attestations: impl Iterator<Item = ElectraAttestation<P>>,
     ) -> Result<ElectraAttestation<P>> {
         let aggregates = attestations
@@ -1080,7 +1092,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         Some((beacon_block, block_rewards))
     }
 
-    pub async fn produce_beacon_block(
+    async fn produce_beacon_block(
         &self,
         block_without_state_root: BeaconBlock<P>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
@@ -1146,7 +1158,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .pipe(Ok)
     }
 
-    pub async fn produce_blinded_block(
+    async fn produce_blinded_block(
         &self,
         mut block_without_state_root: BeaconBlock<P>,
         execution_payload_header_handle: Option<ExecutionPayloadHeaderJoinHandle<P>>,
@@ -1457,6 +1469,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             )
     }
 
+    #[instrument(skip_all, level = "debug")]
     pub async fn prepare_execution_payload_attributes(
         &self,
     ) -> Result<Option<PayloadAttributes<P>>> {
@@ -1553,6 +1566,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         Ok(Some(payload_attributes))
     }
 
+    #[instrument(skip_all, level = "debug")]
     pub async fn prepare_execution_payload_for_slot(
         &self,
         slot: Slot,
@@ -1594,6 +1608,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         }
     }
 
+    #[instrument(skip_all, level = "debug")]
     async fn prepare_execution_payload(
         &self,
         safe_block_hash: ExecutionBlockHash,

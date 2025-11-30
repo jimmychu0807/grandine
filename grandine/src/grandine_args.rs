@@ -13,6 +13,7 @@ use core::{
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{ensure, Result};
+use binary_utils::TelemetryConfig;
 use bls::PublicKeyBytes;
 use builder_api::{
     BuilderApiFormat, BuilderConfig, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS,
@@ -57,6 +58,7 @@ use ssz::Uint256;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tower_http::cors::AllowOrigin;
+use tracing::Level;
 use types::{
     bellatrix::primitives::{Difficulty, Gas},
     config::Config as ChainConfig,
@@ -200,6 +202,10 @@ struct ChainOptions {
 
 #[derive(Args)]
 struct HttpApiOptions {
+    /// Run Grandine without HTTP API server.
+    #[clap(long, default_value_t = false)]
+    disable_http_api: bool,
+
     /// HTTP API address
     #[clap(long, default_value_t = HttpApiConfig::default().address.ip())]
     http_address: IpAddr,
@@ -218,26 +224,31 @@ struct HttpApiOptions {
     timeout: u64,
 }
 
-impl From<HttpApiOptions> for HttpApiConfig {
+impl From<HttpApiOptions> for Option<HttpApiConfig> {
     fn from(http_api_options: HttpApiOptions) -> Self {
         let HttpApiOptions {
+            disable_http_api,
             http_address,
             http_port,
             http_allowed_origins,
             timeout,
         } = http_api_options;
 
-        let Self {
+        if disable_http_api {
+            return None;
+        }
+
+        let HttpApiConfig {
             address,
             allow_origin,
             ..
-        } = Self::with_address(http_address, http_port);
+        } = HttpApiConfig::with_address(http_address, http_port);
 
-        Self {
+        Some(HttpApiConfig {
             address,
             allow_origin: headers_to_allow_origin(http_allowed_origins).unwrap_or(allow_origin),
             timeout: Some(Duration::from_millis(timeout)),
-        }
+        })
     }
 }
 
@@ -390,9 +401,21 @@ struct BeaconNodeOptions {
     #[clap(long, default_value_t = DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS)]
     metrics_update_interval: u64,
 
-    /// Optional remote metrics URL that Grandine will periodically send metrics to
+    /// Optional remote metrics (beaconcha.in metrics) URL that Grandine will periodically send metrics to
     #[clap(long)]
     remote_metrics_url: Option<RedactingUrl>,
+
+    /// The default tracing level controlling how detailed telemetry output will be.
+    #[clap(long, requires("telemetry_metrics_url"), default_value_t = Level::INFO)]
+    telemetry_level: Level,
+
+    /// Optional OTLP metrics gRPC URL that Grandine will submit tracing and span data to
+    #[clap(long)]
+    telemetry_metrics_url: Option<RedactingUrl>,
+
+    /// Optional OTLP service name.
+    #[clap(long, requires("telemetry_metrics_url"), default_value_t = APPLICATION_NAME.to_string())]
+    telemetry_service_name: String,
 
     /// Enable validator liveness tracking
     /// [default: disabled]
@@ -549,6 +572,20 @@ struct NetworkConfigOptions {
     /// List of trusted peers
     #[clap(long, value_delimiter = ',')]
     trusted_peers: Vec<PeerIdSerialized>,
+}
+
+impl BeaconNodeOptions {
+    pub fn telemetry_config(&self) -> Option<TelemetryConfig> {
+        if let Some(url) = self.telemetry_metrics_url.clone() {
+            return Some(TelemetryConfig {
+                url,
+                service_name: self.telemetry_service_name.clone(),
+                trace_level: self.telemetry_level,
+            });
+        }
+
+        None
+    }
 }
 
 impl NetworkConfigOptions {
@@ -968,6 +1005,8 @@ impl GrandineArgs {
             genesis_state_download_url,
         } = chain_options;
 
+        let telemetry_config = beacon_node_options.telemetry_config();
+
         let BeaconNodeOptions {
             max_empty_slots,
             max_events,
@@ -1007,6 +1046,7 @@ impl GrandineArgs {
             blacklisted_blocks,
             disable_engine_getblobs,
             sync_without_reconstruction,
+            ..
         } = beacon_node_options;
 
         // let SlasherOptions {
@@ -1236,12 +1276,17 @@ impl GrandineArgs {
             timeout: request_timeout,
         });
 
-        let http_api_config = HttpApiConfig::from(http_api_options);
+        let mut services = vec![];
+
         let validator_api_config = validator_api_options
             .enable_validator_api
             .then(|| ValidatorApiConfig::from(validator_api_options));
 
-        let mut services = vec![(http_api_config.address, "HTTP API")];
+        let http_api_config = Option::<HttpApiConfig>::from(http_api_options);
+
+        if let Some(http_api_config) = http_api_config.as_ref() {
+            services.push((http_api_config.address, "HTTP API"));
+        }
 
         if let Some(metrics_server_config) = metrics_server_config.as_ref() {
             services.push((SocketAddr::from(metrics_server_config), "Metrics API"));
@@ -1405,6 +1450,7 @@ impl GrandineArgs {
             http_api_config,
             max_events,
             metrics_config,
+            telemetry_config,
             track_liveness,
             detect_doppelgangers,
             use_validator_key_cache,
@@ -1426,8 +1472,13 @@ impl GrandineArgs {
         Self::command().error(ErrorKind::ValueValidation, message)
     }
 
-    pub fn data_dir(&self) -> PathBuf {
-        directories::data_directory(self.beacon_node_options.data_dir.as_ref())
+    pub fn data_dir(&self) -> Option<PathBuf> {
+        (!self.beacon_node_options.in_memory)
+            .then(|| directories::data_directory(self.beacon_node_options.data_dir.as_ref()))
+    }
+
+    pub fn telemetry_config(&self) -> Option<TelemetryConfig> {
+        self.beacon_node_options.telemetry_config()
     }
 }
 
@@ -1774,12 +1825,18 @@ mod tests {
     }
 
     #[test]
+    fn http_api_disabled() {
+        let config = config_from_args(["--http-port", "1234", "--disable-http-api"]);
+        assert!(config.http_api_config.is_none());
+    }
+
+    #[test]
     fn http_port_option() {
         let config = config_from_args(["--http-port", "1234"]);
 
         assert_eq!(
-            config.http_api_config.address,
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1234),
+            config.http_api_config.map(|config| config.address),
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1234)),
         );
     }
 
@@ -1789,8 +1846,11 @@ mod tests {
 
         // `Debug` is the only way to inspect the contents of `AllowOrigin`.
         assert_eq!(
-            format!("{:?}", config.http_api_config.allow_origin),
-            "List([\"http://127.0.0.1:5052\"])",
+            format!(
+                "{:?}",
+                config.http_api_config.map(|config| config.allow_origin)
+            ),
+            "Some(List([\"http://127.0.0.1:5052\"]))",
         );
     }
 
@@ -1800,8 +1860,11 @@ mod tests {
 
         // `Debug` is the only way to inspect the contents of `AllowOrigin`.
         assert_eq!(
-            format!("{:?}", config.http_api_config.allow_origin),
-            "Const(\"*\")",
+            format!(
+                "{:?}",
+                config.http_api_config.map(|config| config.allow_origin)
+            ),
+            "Some(Const(\"*\"))",
         );
     }
 
@@ -1816,8 +1879,11 @@ mod tests {
 
         // `Debug` is the only way to inspect the contents of `AllowOrigin`.
         assert_eq!(
-            format!("{:?}", config.http_api_config.allow_origin),
-            "List([\"http://localhost\", \"http://example.com\"])",
+            format!(
+                "{:?}",
+                config.http_api_config.map(|config| config.allow_origin)
+            ),
+            "Some(List([\"http://localhost\", \"http://example.com\"]))",
         );
     }
 
@@ -1834,9 +1900,85 @@ mod tests {
 
         // `Debug` is the only way to inspect the contents of `AllowOrigin`.
         assert_eq!(
-            format!("{:?}", config.http_api_config.allow_origin),
-            "Const(\"*\")",
+            format!(
+                "{:?}",
+                config.http_api_config.map(|config| config.allow_origin)
+            ),
+            "Some(Const(\"*\"))",
         );
+    }
+
+    #[test]
+    fn telemetry_config_disabled_by_default() {
+        let config = config_from_args([]);
+        assert!(config.telemetry_config.is_none());
+    }
+
+    #[test]
+    fn telemetry_config_options() {
+        let config = config_from_args(["--telemetry-metrics-url", "http://localhost:4317"]);
+        let telemetry_config = config.telemetry_config;
+
+        assert_eq!(
+            telemetry_config
+                .as_ref()
+                .map(|config| config.url.to_string()),
+            Some("http://localhost:4317/".to_owned()),
+        );
+
+        assert_eq!(
+            telemetry_config.as_ref().map(|config| config.trace_level),
+            Some(Level::INFO),
+        );
+
+        assert_eq!(
+            telemetry_config.map(|config| config.service_name),
+            Some("Grandine".to_owned()),
+        );
+    }
+
+    #[test]
+    fn telemetry_config_custom_service_name() {
+        let config = config_from_args([
+            "--telemetry-metrics-url",
+            "http://localhost:4317",
+            "--telemetry-service-name",
+            "grandine-bn",
+            "--telemetry-level",
+            "debug",
+        ]);
+
+        let telemetry_config = config.telemetry_config;
+
+        assert_eq!(
+            telemetry_config
+                .as_ref()
+                .map(|config| config.url.to_string()),
+            Some("http://localhost:4317/".to_owned()),
+        );
+
+        assert_eq!(
+            telemetry_config.as_ref().map(|config| config.trace_level),
+            Some(Level::DEBUG),
+        );
+
+        assert_eq!(
+            telemetry_config.map(|config| config.service_name),
+            Some("grandine-bn".to_owned()),
+        );
+    }
+
+    #[test]
+    fn telemetry_config_service_name_without_url() {
+        try_config_from_args(["--telemetry-service-name", "grandine-bn"]).expect_err(
+            "passing --telemetry-service-name without --telemetry-metrics-url should fail",
+        );
+    }
+
+    #[test]
+    fn telemetry_level_without_url() {
+        try_config_from_args(["--telemetry-level", "debug"])
+            .expect_err("passing --telemetry-level without --telemetry-metrics-url should fail");
     }
 
     #[test]
