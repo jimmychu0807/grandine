@@ -2171,7 +2171,7 @@ name = "bls-zkcrypto"
 version = "0.0.0"
 dependencies = [
  "bls-core",
- "bls12_381 0.8.0 (git+https://github.com/grandinetech/universal-precompiles.git?tag=bls12_381-6bb9695-up.1)",
+ "bls12_381 0.8.0 (git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=jc%2Fzkvm-zisk-bls12_381)",
  "derivative",
  "derive_more 2.0.1",
  "ff 0.13.1",
@@ -2207,7 +2207,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/grandinetech/universal-precompiles.git?tag=bls12_381-6bb9695-up.1#673d417a78d34473f503972efb224b97b588d762"
+source = "git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=jc%2Fzkvm-zisk-bls12_381#ba6f4fff1bc3fb7befe6730acf91e745cd52a0cb"
 dependencies = [
  "bytemuck",
  "cfg-if",
@@ -2221,6 +2221,7 @@ dependencies = [
  "risc0-bigint2",
  "sp1-lib",
  "subtle",
+ "ziskos",
  "zkm-lib",
 ]
 
@@ -6584,6 +6585,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
+name = "lib-c"
+version = "0.13.0"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.13.0#ea1ed4c518992a170fc59ec19f1228eb4829a9e1"
+
+[[package]]
 name = "libc"
 version = "0.2.177"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10349,9 +10355,9 @@ dependencies = [
 
 [[package]]
 name = "risc0-bigint2"
-version = "1.4.10"
+version = "1.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e916aa385e61e31935d7964aaeaec1fae9da617af6415d6363864147f430ebff"
+checksum = "3bd8ae1058e6f5d4635dfd206a41bab7ad64067df70421a5f32e18b1a17979ac"
 dependencies = [
  "include_bytes_aligned",
  "stability",
@@ -11560,11 +11566,12 @@ dependencies = [
 [[package]]
 name = "sha2"
 version = "0.10.9"
-source = "git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.1#dab12204de2e6a40f7a4c93b59347f60174c6953"
+source = "git+https://github.com/jimmychu0807/grandine-universal-precompiles.git?branch=jc%2Fzkvm-zisk-sha2#ec66a7f53d42243cc546621212c321aed131b20c"
 dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest 0.10.7",
+ "ziskos",
 ]
 
 [[package]]
@@ -14838,6 +14845,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ziskos"
+version = "0.13.0"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.13.0#ea1ed4c518992a170fc59ec19f1228eb4829a9e1"
+dependencies = [
+ "cfg-if",
+ "getrandom 0.2.16",
+ "lazy_static",
+ "lib-c",
+ "num-bigint 0.4.6",
+ "num-traits",
+ "rand 0.8.5",
+ "static_assertions",
+ "tiny-keccak",
+]
+
+[[package]]
 name = "zkhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14867,7 +14890,7 @@ dependencies = [
 [[package]]
 name = "zkm-lib"
 version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git#48a6e677648f82af41fd20bb15c2171a5d2a2d6b"
+source = "git+https://github.com/ProjectZKM/Ziren.git#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -14879,7 +14902,7 @@ dependencies = [
 [[package]]
 name = "zkm-primitives"
 version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git#48a6e677648f82af41fd20bb15c2171a5d2a2d6b"
+source = "git+https://github.com/ProjectZKM/Ziren.git#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
 dependencies = [
  "bincode",
  "hex",
@@ -14896,7 +14919,7 @@ dependencies = [
 
 [[package]]
 name = "zkvm_guest_risc0"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "risc0-build",
 ]
@@ -14906,17 +14929,20 @@ name = "zkvm_host"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bincode",
  "bls",
  "bls-zkcrypto",
  "borsh",
  "clap",
  "database",
  "enum-iterator",
+ "hex",
  "pico-sdk",
  "pico-vm",
  "pubkey_cache",
  "reqwest",
  "risc0-zkvm",
+ "serde",
  "serde_json",
  "snap",
  "sp1-helper",

@@ -21,4 +21,10 @@ transition_functions = { path = '../../../transition_functions' }
 types = { path = '../../../types' }
 
 # Specify sha2 library to activate `zkvm-pico` feature
-sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.1', features = ['compress', 'zkvm-pico'] }
+# sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.1', features = ['compress', 'zkvm-pico'] }
+# sha2 = { path = "../../../../grandine-universal-precompiles-sha2/sha2", features = ['compress', 'zkvm-pico'] }
+sha2 = { git = 'https://github.com/jimmychu0807/grandine-universal-precompiles.git', branch = 'jc/zkvm-zisk-sha2', features = ['compress', 'zkvm-pico'] }
+
+[patch.'https://github.com/zkcrypto/bls12_381.git']
+# bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.1' }
+bls12_381 = { git = 'https://github.com/jimmychu0807/grandine-universal-precompiles.git', branch = 'jc/zkvm-zisk-bls12_381' }

@@ -9,15 +9,18 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+bincode = { workspace = true, optional = true }
 bls = { workspace = true, features = ['zkcrypto'] }
 bls-zkcrypto = { workspace = true, optional = true }
 borsh = { workspace = true, optional = true }
 clap = { workspace = true, features = ['derive'] }
 database = { workspace = true }
 enum-iterator = { workspace = true }
+hex = { workspace = true, optional = true }
 pubkey_cache = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
 risc0-zkvm = { workspace = true, optional = true, features = ['unstable', 'heap-embedded-alloc'] }
+serde = { workspace = true, optional = true  }
 serde_json = { workspace = true, optional = true  }
 snap = { workspace = true }
 sp1-sdk = { workspace = true, optional = true }
@@ -52,4 +55,9 @@ pico = [
     "dep:pico-sdk",
     "dep:pico-vm",
     "bls-zkcrypto/zkvm-pico",
+]
+zisk = [
+    "dep:bincode",
+    "dep:hex",
+    "dep:serde",
 ]

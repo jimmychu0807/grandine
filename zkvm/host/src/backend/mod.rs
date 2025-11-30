@@ -16,6 +16,11 @@ mod pico;
 #[cfg(feature = "pico")]
 pub use pico::*;
 
+#[cfg(feature = "zisk")]
+mod zisk;
+#[cfg(feature = "zisk")]
+pub use zisk::*;
+
 #[derive(Clone, Copy, Debug)]
 pub enum ConfigKind {
     Mainnet = 0,
