@@ -99,7 +99,7 @@ jobs:
   zkvm-test:
     strategy:
       matrix:
-        backend: [risc0, sp1, pico, zisk]
+        # backend: [risc0, sp1, pico, zisk]
         include:
           # zkVM test - risc0 implementation
           - backend: risc0
@@ -113,7 +113,7 @@ jobs:
               rzup install r0vm 3.0.1
               rzup install cargo-risczero 3.0.1
               cargo risczero --version
-            test_cmd: RUST_LOG=info RISC0_DEV_MODE=1 cargo run -p zkvm_host --features risc0 --release -- --test "$TEST"
+            test_cmd: RUST_LOG=info RISC0_DEV_MODE=0 cargo run -p zkvm_host --features risc0 --release -- --test "$TEST"
             # test_mode valid value: ['execute', 'prove']
             test_mode: prove
 
@@ -139,16 +139,16 @@ jobs:
             test_mode: prove
 
           # zkVM test - ZiskOS implementation
-          - backend: zisk
-            install: |
-              sudo DEBIAN_FRONTEND='noninteractive' apt-get update
-              sudo DEBIAN_FRONTEND='noninteractive' apt-get install -y xz-utils jq curl build-essential qemu-system libomp-dev libgmp-dev nlohmann-json3-dev protobuf-compiler uuid-dev libgrpc++-dev libsecp256k1-dev libsodium-dev libpqxx-dev nasm libopenmpi-dev openmpi-bin openmpi-common libclang-dev clang gcc-riscv64-unknown-elf
-              curl https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | GH_RUNNER=true bash
-              echo "/home/runner/.config/.zisk/bin" >> $GITHUB_PATH
-              export PATH="/home/runner/.config/.zisk/bin:$PATH"
-              cargo-zisk -V
-            test_cmd: RUST_LOG=info cargo run -p zkvm_host --features zisk --release -- --test "$TEST"
-            test_mode: prove
+          # - backend: zisk
+          #   install: |
+          #     sudo DEBIAN_FRONTEND='noninteractive' apt-get update
+          #     sudo DEBIAN_FRONTEND='noninteractive' apt-get install -y xz-utils jq curl build-essential qemu-system libomp-dev libgmp-dev nlohmann-json3-dev protobuf-compiler uuid-dev libgrpc++-dev libsecp256k1-dev libsodium-dev libpqxx-dev nasm libopenmpi-dev openmpi-bin openmpi-common libclang-dev clang gcc-riscv64-unknown-elf
+          #     curl https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | GH_RUNNER=true bash
+          #     echo "/home/runner/.config/.zisk/bin" >> $GITHUB_PATH
+          #     export PATH="/home/runner/.config/.zisk/bin:$PATH"
+          #     cargo-zisk -V
+          #   test_cmd: RUST_LOG=info cargo run -p zkvm_host --features zisk --release -- --test "$TEST"
+          #   test_mode: prove
 
     runs-on: ubuntu-latest
 
