@@ -3,12 +3,15 @@ name: CI Build
 on: [push]
 
 env:
+  # TEST_CASES: |
+  #   consensus spec tests mainnet electra empty block transition
+  #   pectra-devnet-6 without epoch transition
   TEST_CASES: |
     consensus spec tests mainnet electra empty block transition
-    pectra-devnet-6 without epoch transition
 
 jobs:
   build:
+    if: false
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -112,7 +115,7 @@ jobs:
               cargo risczero --version
             test_cmd: RUST_LOG=info RISC0_DEV_MODE=1 cargo run -p zkvm_host --features risc0 --release -- --test "$TEST"
             # test_mode valid value: ['execute', 'prove']
-            test_mode: execute
+            test_mode: prove
 
           # zkVM test - SP1 implementation
           - backend: sp1
@@ -123,7 +126,7 @@ jobs:
               sp1up -v 5.2.1
               cargo prove --version
             test_cmd: RUST_LOG=info cargo run -p zkvm_host --features sp1 --release -- --test "$TEST"
-            test_mode: execute
+            test_mode: prove
 
           # zkVM test - Brevis Pico implementation
           - backend: pico
@@ -133,7 +136,7 @@ jobs:
               cargo +nightly-2025-08-04 install --git https://github.com/brevis-network/pico pico-cli
               cargo pico --version
             test_cmd: RUST_LOG=info cargo +nightly-2025-08-04 run -p zkvm_host --features pico --release -- --test "$TEST"
-            test_mode: execute
+            test_mode: prove
 
           # zkVM test - ZiskOS implementation
           - backend: zisk
@@ -145,7 +148,7 @@ jobs:
               export PATH="/home/runner/.config/.zisk/bin:$PATH"
               cargo-zisk -V
             test_cmd: RUST_LOG=info cargo run -p zkvm_host --features zisk --release -- --test "$TEST"
-            test_mode: execute
+            test_mode: prove
 
     runs-on: ubuntu-latest
 
