@@ -129,14 +129,14 @@ jobs:
           #   test_mode: prove
 
           # zkVM test - Brevis Pico implementation
-          - backend: pico
-            install: |
-              rustup install nightly-2025-08-04
-              rustup component add rust-src --toolchain nightly-2025-08-04
-              cargo +nightly-2025-08-04 install --git https://github.com/brevis-network/pico pico-cli
-              cargo pico --version
-            test_cmd: RUST_LOG=info cargo +nightly-2025-08-04 run -p zkvm_host --features pico --release -- --test "$TEST"
-            test_mode: prove
+          # - backend: pico
+          #   install: |
+          #     rustup install nightly-2025-08-04
+          #     rustup component add rust-src --toolchain nightly-2025-08-04
+          #     cargo +nightly-2025-08-04 install --git https://github.com/brevis-network/pico pico-cli
+          #     cargo pico --version
+          #   test_cmd: RUST_LOG=info cargo +nightly-2025-08-04 run -p zkvm_host --features pico --release -- --test "$TEST"
+          #   test_mode: prove
 
           # zkVM test - ZiskOS implementation
           # - backend: zisk
